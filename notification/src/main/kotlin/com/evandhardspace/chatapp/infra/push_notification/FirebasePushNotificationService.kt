@@ -30,24 +30,37 @@ class FirebasePushNotificationService(
 
     private val logger = LoggerFactory.getLogger(FirebasePushNotificationService::class.java)
 
+    @Volatile
+    private var initialized = false
+
     @PostConstruct
     fun initialize() {
         try {
             val serviceAccount = resourceLoader.getResource(credentialsPath)
+            if (!serviceAccount.exists()) {
+                logger.warn(
+                    "Firebase credentials not found at '{}' – push notifications are disabled. " +
+                    "Provide the file to enable FCM.", credentialsPath
+                )
+                return
+            }
 
             val options = FirebaseOptions.builder()
                 .setCredentials(GoogleCredentials.fromStream(serviceAccount.inputStream))
                 .build()
 
             FirebaseApp.initializeApp(options)
+            initialized = true
             logger.info("Firebase Admin SDK initialized successfully")
         } catch(e: Exception) {
             logger.error("Error initializing Firebase Admin SDK", e)
-            throw e
+            // Do not rethrow – allow the application to start without push notification support
         }
     }
 
     fun isValidToken(token: String): Boolean {
+        if (!initialized) return true   // no-op when Firebase is not configured
+
         val message = Message.builder()
             .setToken(token)
             .build()
@@ -62,6 +75,14 @@ class FirebasePushNotificationService(
     }
 
     fun sendNotification(notification: PushNotification): PushNotificationSendResult {
+        if (!initialized) {
+            logger.debug("Firebase not initialised – skipping push notification for {}", notification.id)
+            return PushNotificationSendResult(
+                succeeded = emptyList(),
+                temporaryFailures = emptyList(),
+                permanentFailures = emptyList(),
+            )
+        }
         val messages = notification.recipients.map { recipient ->
             Message.builder()
                 .setToken(recipient.token)

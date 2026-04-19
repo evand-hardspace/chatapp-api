@@ -12,7 +12,7 @@ import java.util.UUID
 
 @Service
 class SupabaseStorageService(
-    @param:Value("\${supabase.url}") private val supabaseUrl: String,
+    @param:Value("\${supabase.public-url}") private val supabasePublicUrl: String,
     private val supabaseRestClient: RestClient,
 ) {
     companion object {
@@ -30,8 +30,9 @@ class SupabaseStorageService(
 
         val fileName = "user_${userId}_${UUID.randomUUID()}.$extension"
         val path = "profile-pictures/$fileName"
+        val resolvedPublicBaseUrl = supabasePublicUrl.trimEnd('/')
 
-        val publicUrl = "$supabaseUrl/storage/v1/object/public/$path"
+        val publicUrl = "$resolvedPublicBaseUrl/storage/v1/object/public/$path"
 
         return ProfilePictureUploadCredentials(
             uploadUrl = createSignedUrl(
@@ -81,7 +82,7 @@ class SupabaseStorageService(
             .body(SignedUploadResponse::class.java)
             ?: throw StorageException("Failed to create signed URL")
 
-        return "$supabaseUrl/storage/v1${response.url}"
+        return "${supabasePublicUrl.trimEnd('/')}/storage/v1${response.url}"
     }
 
     private data class SignedUploadResponse(

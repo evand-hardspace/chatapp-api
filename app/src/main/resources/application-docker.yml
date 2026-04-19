@@ -1,0 +1,34 @@
+spring:
+  data:
+    redis:
+      host: redis
+      port: 6379
+      username: ~
+      password: ~
+
+
+  mail:
+    host: mailpit
+    port: 1025
+    username: ""
+    password: ""
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    ssl:
+      enabled: false
+    virtual-host: /
+
+supabase:
+  url: ${SUPABASE_URL}
+  public-url: ${SUPABASE_PUBLIC_URL}
+  service-key: ${SUPABASE_SERVICE_KEY}
