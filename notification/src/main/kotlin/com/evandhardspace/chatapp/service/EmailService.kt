@@ -72,6 +72,7 @@ class EmailService(
             variables = mapOf(
                 "username" to username,
                 "devResetPasswordUrl" to devUrl,
+                "resetPasswordUrl" to devUrl,
                 "expiresInMinutes" to expiresIn.toMinutes()
             )
         )

@@ -1,0 +1,213 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatapp-backend
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      supabase-storage:
+        condition: service_started
+      supabase-storage-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev,docker}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://supabase-db:5432/postgres}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:-supabase_admin}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgres}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      MAILGUN_PASSWORD: ${MAILGUN_PASSWORD:-mailpit}
+      JWT_SECRET_BASE64: ${JWT_SECRET_BASE64:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      API_KEY_ADMIN_USERNAME: ${API_KEY_ADMIN_USERNAME:-admin}
+      API_KEY_ADMIN_PASSWORD: ${API_KEY_ADMIN_PASSWORD:-admin}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxvY2FsIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE4OTM0NTYwMDAsInJvbGUiOiJzZXJ2aWNlX3JvbGUifQ.WQfY-cofoIrC5-wP2JS4KOk1jsFkjE6SLaCWl9cF9ck}
+      SUPABASE_URL: ${SUPABASE_URL:-http://supabase-gateway:8000}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-http://localhost:54321}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+
+  supabase-db:
+    image: supabase/postgres:15.8.1.060
+    container_name: chatapp-supabase-db
+    environment:
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    ports:
+      - "54322:5432"
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/00-init-schemas.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  supabase-db-seed:
+    image: postgres:15-alpine
+    container_name: chatapp-supabase-db-seed
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    environment:
+      PGUSER: ${SPRING_DATASOURCE_USERNAME:-supabase_admin}
+      PGPASSWORD: ${SPRING_DATASOURCE_PASSWORD:-postgres}
+    command: >
+      sh -ec "
+      until psql -h supabase-db -d postgres -tAc \"select 1\" >/dev/null 2>&1; do sleep 2; done;
+      until psql -h supabase-db -d postgres -tAc \"select 1 from information_schema.tables where table_schema='user_service' and table_name='users'\" | grep -q 1; do sleep 2; done;
+      psql -h supabase-db -d postgres -v ON_ERROR_STOP=1 -f /seed/seed-dev-data.sql
+      "
+    volumes:
+      - ./docker/seed-dev-data.sql:/seed/seed-dev-data.sql:ro
+    restart: "no"
+
+  supabase-rest:
+    image: postgrest/postgrest:v12.2.0
+    container_name: chatapp-supabase-rest
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      PGRST_DB_ANON_ROLE: postgres
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+
+  minio:
+    image: minio/minio:RELEASE.2025-02-18T16-25-55Z
+    container_name: chatapp-supabase-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123456}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-createbucket:
+    image: minio/mc:latest
+    container_name: chatapp-supabase-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio} ${MINIO_ROOT_PASSWORD:-minio123456}; do sleep 2; done;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio} ${MINIO_ROOT_PASSWORD:-minio123456};
+      mc mb -p local/${SUPABASE_STORAGE_BUCKET:-profile-pictures} || true;
+      mc anonymous set public local/${SUPABASE_STORAGE_BUCKET:-profile-pictures} || true;
+      "
+    restart: "no"
+
+  supabase-storage:
+    image: supabase/storage-api:v1.25.7
+    container_name: chatapp-supabase-storage
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      minio-createbucket:
+        condition: service_completed_successfully
+      supabase-rest:
+        condition: service_started
+    environment:
+      ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxvY2FsIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE4OTM0NTYwMDAsInJvbGUiOiJhbm9uIn0.ZvzVI6_kk8pU1W_4W9jOG7I2gmMPE2zYtVsuTAXAvEo}
+      SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxvY2FsIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE4OTM0NTYwMDAsInJvbGUiOiJzZXJ2aWNlX3JvbGUifQ.WQfY-cofoIrC5-wP2JS4KOk1jsFkjE6SLaCWl9cF9ck}
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      PGOPTIONS: -c search_path=storage,public
+      PGRST_URL: http://supabase-rest:3000
+      REGION: us-east-1
+      GLOBAL_S3_BUCKET: ${SUPABASE_STORAGE_BUCKET:-profile-pictures}
+      GLOBAL_S3_ENDPOINT: http://minio:9000
+      GLOBAL_S3_PROTOCOL: http
+      GLOBAL_S3_FORCE_PATH_STYLE: "true"
+      TENANT_ID: stub
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: s3
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio123456}
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      IMGPROXY_URL: ""
+  supabase-gateway:
+    image: nginx:1.27-alpine
+    container_name: chatapp-supabase-gateway
+    depends_on:
+      supabase-storage:
+        condition: service_started
+    volumes:
+      - ./docker/supabase-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "54321:8000"
+
+  supabase-storage-init:
+    image: curlimages/curl:8.8.0
+    container_name: chatapp-supabase-storage-init
+    depends_on:
+      supabase-gateway:
+        condition: service_started
+    environment:
+      GATEWAY_URL: http://supabase-gateway:8000
+      SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxvY2FsIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE4OTM0NTYwMDAsInJvbGUiOiJzZXJ2aWNlX3JvbGUifQ.WQfY-cofoIrC5-wP2JS4KOk1jsFkjE6SLaCWl9cF9ck}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-profile-pictures}
+    volumes:
+      - ./docker/init-supabase-storage.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    container_name: chatapp-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: chatapp-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.20.6
+    container_name: chatapp-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  supabase-db-data:
+  minio-data:
+  redis-data:
+  rabbitmq-data:
+

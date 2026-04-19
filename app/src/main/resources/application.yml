@@ -13,9 +13,9 @@ spring:
       timeout: 2000ms
 
   datasource:
-    url: jdbc:postgresql://aws-1-eu-north-1.pooler.supabase.com:5432/postgres
-    username: postgres.vccslxuszrxdslskmscv
-    password: ${POSTGRES_PASSWORD}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://aws-1-eu-north-1.pooler.supabase.com:5432/postgres}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres.vccslxuszrxdslskmscv}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
     hikari:
@@ -40,6 +40,8 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
         show_sql: true
+        hbm2ddl:
+          create_namespaces: true
 
   mail:
     port: 587
@@ -96,7 +98,8 @@ nginx:
     - "10.0.0.5/32" # nginx server IP (if separate machine)
 
 supabase:
-  url: "https://vccslxuszrxdslskmscv.supabase.co"
+  url: ${SUPABASE_URL:https://vccslxuszrxdslskmscv.supabase.co}
+  public-url: ${SUPABASE_PUBLIC_URL:${SUPABASE_URL:https://vccslxuszrxdslskmscv.supabase.co}}
   service-key: ${SUPABASE_SERVICE_KEY}
 
 firebase:

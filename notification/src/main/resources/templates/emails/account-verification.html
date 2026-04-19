@@ -13,6 +13,11 @@
         <a th:href="${devVerificationUrl}" class="button" style="color: blue;">Development verification Link</a>
     </div>
 
+    <p style="margin-top: 20px;">If the button does not work, use this link:</p>
+    <p style="word-break: break-all; font-size: 14px;">
+        <a th:href="${devVerificationUrl}" th:text="${devVerificationUrl}">chatapp://...</a>
+    </p>
+
     <div class="text-muted" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e9ecef;">
         <p><strong>Why verify?</strong></p>
         <p>Email verification helps us ensure that you own this email address and protects your account from unauthorized access.</p>

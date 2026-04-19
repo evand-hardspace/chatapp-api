@@ -19,7 +19,7 @@ class ProfilePictureService(
     private val supabaseStorageService: SupabaseStorageService,
     private val chatParticipantRepository: ChatParticipantRepository,
     private val applicationEventPublisher: ApplicationEventPublisher,
-    @param:Value("\${supabase.url}") private val supabaseUrl: String,
+    @param:Value("\${supabase.public-url}") private val supabasePublicUrl: String,
 ) {
 
     private val logger = LoggerFactory.getLogger(ProfilePictureService::class.java)
@@ -30,7 +30,7 @@ class ProfilePictureService(
     ): ProfilePictureUploadCredentials {
         return supabaseStorageService.generateSignedUploadUrl(
             userId = userId,
-            mimeType = mimeType
+            mimeType = mimeType,
         )
     }
 
@@ -57,7 +57,9 @@ class ProfilePictureService(
 
     @Transactional
     fun confirmProfilePictureUpload(userId: UserId, publicUrl: String) {
-        if(!publicUrl.startsWith(supabaseUrl)) {
+        val validPrefix = publicUrl.startsWith("${supabasePublicUrl.trimEnd('/')}/storage/v1/object/public/")
+
+        if(!validPrefix) {
             throw InvalidProfilePictureException("Invalid profile picture URL")
         }
 
